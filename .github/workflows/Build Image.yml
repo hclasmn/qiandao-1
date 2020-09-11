@@ -1,20 +1,63 @@
-name: Build Image
+name: Docker
+
 on:
-  release:
-    types: [published]
+  push:
+    # Publish `master` as Docker `latest` image.
+    branches:
+      - master
+
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+
+  # Run tests for any PRs.
+  pull_request:
+       branches:
+        - master
+  
+
+env:
+  # TODO: Change variable to your image's name.
+  IMAGE_NAME: hclasmn/qiandao:test
 jobs:
-  build:
-      runs-on: ubuntu-latest
-      name: Build image job
-      steps:
-          - name: Checkout master
-            uses: actions/checkout@master
-          - name: Build and publish image
-            uses: ilteoood/docker_buildx@master
-            with:
-              publish: true
-              imageName: asdaragon/qiandao # dockerid/imageName
-              platform: linux/arm64,linux/amd64 # 你准备构建的镜像平台
-              tag: 20200910,latest
-              dockerHubUser: ${{ secrets.DOCKER_USERNAME }} # docker hub userid 在setting创建secrets name=DOCKER_USERNAME  value=dockerid
-              dockerHubPassword: ${{ secrets.DOCKER_PASSWORD }} # docker hub password,在setting创建secrets name=DOCKER_PASSWORD  value=dockerpassword
+  # Run tests.
+  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run tests
+        run: |
+          if [ -f docker-compose.test.yml ]; then
+            docker-compose --file docker-compose.test.yml build
+            docker-compose --file docker-compose.test.yml run sut
+          else
+            docker build . --file Dockerfile
+          fi
+  # Push image to GitHub Packages.
+  # See also https://docs.docker.com/docker-hub/builds/
+  push:
+    # Ensure test job passes before pushing image.
+    needs: test
+
+    runs-on: ubuntu-latest
+#    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build image
+        run: docker build . --file Dockerfile --tag $IMAGE_NAME
+
+      - name: Log into registry
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login  -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+      - name: Push image
+        run: docker push $IMAGE_NAME
+        
+      - name: chmod
+        run: chmod 777 ./build.sh
+      - name: buildx
+        run: ./build.sh
